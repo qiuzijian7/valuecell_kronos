@@ -31,6 +31,11 @@ dependencies = [
     "ccxt>=4.5.15",
     "baostock>=0.8.9",
     "func-timeout>=4.3.5",
+    # Kronos dependencies
+    "torch>=2.0.0",
+    "einops>=0.8.0",
+    "safetensors>=0.6.0",
+    "plotly>=5.0.0",
 ]
 
 [project.optional-dependencies]

@@ -12,6 +12,7 @@ import {
   Conversation,
   Logo,
   Market,
+  Prediction,
   Ranking,
   Setting,
   StrategyAgent,
@@ -154,6 +155,12 @@ const AppSidebar: FC = () => {
           icon: StrategyAgent,
           label: t("nav.strategy"),
           to: "/agent/StrategyAgent",
+        },
+        {
+          id: "prediction",
+          icon: Prediction,
+          label: t("nav.prediction"),
+          to: "/prediction",
         },
         {
           id: "ranking",

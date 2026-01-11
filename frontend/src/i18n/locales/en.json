@@ -110,6 +110,7 @@
   "nav": {
     "home": "Home",
     "strategy": "Strategy",
+    "prediction": "Prediction",
     "ranking": "Ranking",
     "market": "Market",
     "setting": "Setting"
@@ -430,5 +431,28 @@
         "description": "Personalized news updates on a custom schedule."
       }
     }
+  },
+  "prediction": {
+    "title": "Kronos Prediction",
+    "welcome": "AI-Powered Stock Prediction",
+    "selectStock": "Select a stock from the watchlist to start prediction analysis",
+    "selectForPrediction": "Select for Prediction",
+    "kronosAnalysis": "Kronos AI Analysis",
+    "lookback": "Lookback",
+    "predLen": "Prediction Length",
+    "temperature": "Temperature",
+    "startPrediction": "Start Prediction",
+    "predicting": "Predicting...",
+    "analyzing": "Analyzing with Kronos AI...",
+    "noData": "No Prediction Data",
+    "clickToStart": "Click 'Start Prediction' to analyze this stock",
+    "error": "Prediction failed: {{message}}",
+    "predictionFailed": "Prediction Failed",
+    "errorMessage": "Error",
+    "resultSummary": "Prediction Summary",
+    "predictionType": "Type",
+    "dataPoints": "Data Points",
+    "inputRange": "Input Range",
+    "predRange": "Prediction Range"
   }
 }

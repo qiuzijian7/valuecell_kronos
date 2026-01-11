@@ -232,4 +232,12 @@ logs
 # Local configs
 python/configs/
 
+# Large model files
+python/models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+
 *.key

@@ -20,6 +20,13 @@ export default [
 
   route("/ranking", "app/rank/board.tsx"),
 
+  ...prefix("/prediction", [
+    layout("app/prediction/_layout.tsx", [
+      index("app/prediction/prediction.tsx"),
+      route("/stock/:stockId", "app/prediction/stock-prediction.tsx"),
+    ]),
+  ]),
+
   ...prefix("/agent", [
     route("/:agentName", "app/agent/chat.tsx"),
     route("/:agentName/config", "app/agent/config.tsx"),

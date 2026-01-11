@@ -110,6 +110,7 @@
   "nav": {
     "home": "首頁",
     "strategy": "策略",
+    "prediction": "預測",
     "ranking": "排行榜",
     "market": "市場",
     "setting": "設定"
@@ -430,5 +431,26 @@
         "description": "按自定義時間表推送個性化新聞更新。"
       }
     }
+  },
+  "prediction": {
+    "title": "Kronos 預測",
+    "welcome": "AI 驅動的股票預測",
+    "selectStock": "從自選股列表中選擇一隻股票開始預測分析",
+    "selectForPrediction": "選擇進行預測",
+    "kronosAnalysis": "Kronos AI 分析",
+    "lookback": "回溯長度",
+    "predLen": "預測長度",
+    "temperature": "溫度",
+    "startPrediction": "開始預測",
+    "predicting": "預測中...",
+    "analyzing": "正在使用 Kronos AI 分析...",
+    "noData": "暫無預測資料",
+    "clickToStart": "點擊「開始預測」分析該股票",
+    "error": "預測失敗: {{message}}",
+    "resultSummary": "預測摘要",
+    "predictionType": "類型",
+    "dataPoints": "資料點數",
+    "inputRange": "輸入範圍",
+    "predRange": "預測範圍"
   }
 }

@@ -7,6 +7,7 @@ export { default as Logo } from "./logo.svg";
 export { default as Send } from "./send.svg";
 export { default as Share } from "./share.svg";
 export { default as Market } from "./sidebar/market.svg";
+export { default as Prediction } from "./sidebar/prediction.svg";
 export { default as Ranking } from "./sidebar/ranking.svg";
 export { default as Setting } from "./sidebar/setting.svg";
 export { default as StrategyAgent } from "./sidebar/strategy-agent.svg";

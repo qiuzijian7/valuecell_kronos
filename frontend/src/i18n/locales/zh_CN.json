@@ -110,6 +110,7 @@
   "nav": {
     "home": "首页",
     "strategy": "策略",
+    "prediction": "预测",
     "ranking": "排行榜",
     "market": "市场",
     "setting": "设置"
@@ -430,5 +431,28 @@
         "description": "按自定义时间表推送个性化新闻更新。"
       }
     }
+  },
+  "prediction": {
+    "title": "Kronos 预测",
+    "welcome": "AI 驱动的股票预测",
+    "selectStock": "从自选股列表中选择一只股票开始预测分析",
+    "selectForPrediction": "选择进行预测",
+    "kronosAnalysis": "Kronos AI 分析",
+    "lookback": "回溯长度",
+    "predLen": "预测长度",
+    "temperature": "温度",
+    "startPrediction": "开始预测",
+    "predicting": "预测中...",
+    "analyzing": "正在使用 Kronos AI 分析...",
+    "noData": "暂无预测数据",
+    "clickToStart": "点击「开始预测」分析该股票",
+    "error": "预测失败: {{message}}",
+    "predictionFailed": "预测失败",
+    "errorMessage": "错误信息",
+    "resultSummary": "预测摘要",
+    "predictionType": "类型",
+    "dataPoints": "数据点数",
+    "inputRange": "输入范围",
+    "predRange": "预测范围"
   }
 }
