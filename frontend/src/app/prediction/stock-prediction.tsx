@@ -1,10 +1,10 @@
 import BackButton from "@valuecell/button/back-button";
 import { useTheme } from "next-themes";
-import { memo, useState } from "react";
+import { memo, useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useGetStockDetail } from "@/api/stock";
-import { useKronosPrediction } from "@/api/kronos";
+import { useKronosPrediction, useKronosAvailableModels, useKronosModelStatus } from "@/api/kronos";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import PredictionChart from "./components/prediction-chart";
@@ -17,11 +17,18 @@ function StockPrediction() {
   const ticker = stockId || "";
 
   const [predictionParams, setPredictionParams] = useState({
+    model_key: "kronos-base",
     lookback: 400,
     pred_len: 120,
     temperature: 1.0,
     top_p: 0.9,
   });
+
+  // Fetch available models
+  const { data: availableModels } = useKronosAvailableModels();
+  
+  // Fetch model status
+  const { data: modelStatus } = useKronosModelStatus();
 
   // Fetch stock detail data
   const {
@@ -82,6 +89,29 @@ function StockPrediction() {
 
       {/* Prediction Controls */}
       <div className="flex flex-wrap items-center gap-4 rounded-lg border border-border bg-muted/50 p-4">
+        {/* Model Selection */}
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-muted-foreground">
+            {t("prediction.model")}:
+          </label>
+          <select
+            value={predictionParams.model_key}
+            onChange={(e) =>
+              setPredictionParams((p) => ({
+                ...p,
+                model_key: e.target.value,
+              }))
+            }
+            className="rounded border border-border bg-background px-2 py-1 text-sm min-w-[140px]"
+          >
+            {availableModels?.models && Object.entries(availableModels.models).map(([key, model]) => (
+              <option key={key} value={key}>
+                {model.name} ({model.params})
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex items-center gap-2">
           <label className="text-sm text-muted-foreground">
             {t("prediction.lookback")}:
@@ -150,6 +180,23 @@ function StockPrediction() {
           {isPredicting ? t("prediction.predicting") : t("prediction.startPrediction")}
         </Button>
       </div>
+
+      {/* Model Status */}
+      {modelStatus && (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className={`h-2 w-2 rounded-full ${modelStatus.loaded ? "bg-green-500" : "bg-yellow-500"}`} />
+          <span>
+            {modelStatus.loaded 
+              ? t("prediction.modelLoaded", { model: modelStatus.current_model?.name ?? "Unknown" })
+              : t("prediction.modelNotLoaded")}
+          </span>
+          {availableModels?.models?.[predictionParams.model_key] && (
+            <span className="text-muted-foreground/70">
+              | {availableModels.models[predictionParams.model_key].description}
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Prediction Error */}
       {predictionError && (

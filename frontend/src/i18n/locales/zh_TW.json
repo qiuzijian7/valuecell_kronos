@@ -438,6 +438,7 @@
     "selectStock": "從自選股列表中選擇一隻股票開始預測分析",
     "selectForPrediction": "選擇進行預測",
     "kronosAnalysis": "Kronos AI 分析",
+    "model": "模型",
     "lookback": "回溯長度",
     "predLen": "預測長度",
     "temperature": "溫度",
@@ -447,10 +448,14 @@
     "noData": "暫無預測資料",
     "clickToStart": "點擊「開始預測」分析該股票",
     "error": "預測失敗: {{message}}",
+    "predictionFailed": "預測失敗",
+    "errorMessage": "錯誤訊息",
     "resultSummary": "預測摘要",
     "predictionType": "類型",
     "dataPoints": "資料點數",
     "inputRange": "輸入範圍",
-    "predRange": "預測範圍"
+    "predRange": "預測範圍",
+    "modelLoaded": "已載入模型: {{model}}",
+    "modelNotLoaded": "模型未載入"
   }
 }

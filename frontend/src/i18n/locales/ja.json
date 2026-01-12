@@ -438,6 +438,7 @@
     "selectStock": "ウォッチリストから株式を選択して予測分析を開始",
     "selectForPrediction": "予測対象を選択",
     "kronosAnalysis": "Kronos AI分析",
+    "model": "モデル",
     "lookback": "ルックバック",
     "predLen": "予測長",
     "temperature": "温度",
@@ -447,10 +448,14 @@
     "noData": "予測データなし",
     "clickToStart": "「予測開始」をクリックしてこの株式を分析",
     "error": "予測失敗: {{message}}",
+    "predictionFailed": "予測失敗",
+    "errorMessage": "エラー",
     "resultSummary": "予測サマリー",
     "predictionType": "タイプ",
     "dataPoints": "データポイント",
     "inputRange": "入力範囲",
-    "predRange": "予測範囲"
+    "predRange": "予測範囲",
+    "modelLoaded": "モデルロード済み: {{model}}",
+    "modelNotLoaded": "モデル未ロード"
   }
 }

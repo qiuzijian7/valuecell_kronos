@@ -1,8 +1,9 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { type ApiResponse, apiClient } from "@/lib/api-client";
 
 export interface KronosPredictionParams {
   ticker: string;
+  model_key?: string;
   lookback?: number;
   pred_len?: number;
   temperature?: number;
@@ -46,12 +47,14 @@ export const useKronosPrediction = (params: KronosPredictionParams) => {
   return useQuery({
     queryKey: KRONOS_QUERY_KEYS.prediction([
       params.ticker,
+      params.model_key ?? "kronos-base",
       String(params.lookback ?? 400),
       String(params.pred_len ?? 120),
     ]),
     queryFn: () =>
       apiClient.post<ApiResponse<KronosPredictionResult>>("kronos/predict", {
         ticker: params.ticker,
+        model_key: params.model_key ?? "kronos-base",
         lookback: params.lookback ?? 400,
         pred_len: params.pred_len ?? 120,
         temperature: params.temperature ?? 1.0,
@@ -71,6 +74,7 @@ export interface KronosModelStatus {
   current_model?: {
     name: string;
     device: string;
+    model_key: string;
   };
 }
 
@@ -103,5 +107,17 @@ export const useKronosAvailableModels = () => {
     queryFn: () =>
       apiClient.get<ApiResponse<KronosAvailableModels>>("kronos/available-models"),
     select: (data) => data.data,
+  });
+};
+
+export interface LoadModelParams {
+  model_key: string;
+  device?: string;
+}
+
+export const useLoadKronosModel = () => {
+  return useMutation({
+    mutationFn: (params: LoadModelParams) =>
+      apiClient.post<ApiResponse<{ message: string }>>("kronos/load-model", params),
   });
 };

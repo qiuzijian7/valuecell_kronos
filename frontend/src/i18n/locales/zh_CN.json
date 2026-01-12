@@ -438,6 +438,7 @@
     "selectStock": "从自选股列表中选择一只股票开始预测分析",
     "selectForPrediction": "选择进行预测",
     "kronosAnalysis": "Kronos AI 分析",
+    "model": "模型",
     "lookback": "回溯长度",
     "predLen": "预测长度",
     "temperature": "温度",
@@ -453,6 +454,8 @@
     "predictionType": "类型",
     "dataPoints": "数据点数",
     "inputRange": "输入范围",
-    "predRange": "预测范围"
+    "predRange": "预测范围",
+    "modelLoaded": "已加载模型: {{model}}",
+    "modelNotLoaded": "模型未加载"
   }
 }

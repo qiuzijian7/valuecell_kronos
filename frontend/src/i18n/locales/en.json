@@ -438,6 +438,7 @@
     "selectStock": "Select a stock from the watchlist to start prediction analysis",
     "selectForPrediction": "Select for Prediction",
     "kronosAnalysis": "Kronos AI Analysis",
+    "model": "Model",
     "lookback": "Lookback",
     "predLen": "Prediction Length",
     "temperature": "Temperature",
@@ -453,6 +454,8 @@
     "predictionType": "Type",
     "dataPoints": "Data Points",
     "inputRange": "Input Range",
-    "predRange": "Prediction Range"
+    "predRange": "Prediction Range",
+    "modelLoaded": "Model loaded: {{model}}",
+    "modelNotLoaded": "Model not loaded"
   }
 }

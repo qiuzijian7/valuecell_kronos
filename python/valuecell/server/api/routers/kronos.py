@@ -36,6 +36,7 @@ except Exception as e:
 _tokenizer = None
 _model = None
 _predictor = None
+_current_model_key = None  # Track which model is currently loaded
 
 # Model base path
 MODEL_BASE_PATH = os.path.join(
@@ -75,6 +76,7 @@ AVAILABLE_MODELS = {
 class PredictionRequest(BaseModel):
     """Prediction request model."""
     ticker: str = Field(..., description="Stock ticker symbol")
+    model_key: str = Field(default="kronos-base", description="Model key to use for prediction")
     lookback: int = Field(default=400, ge=100, le=512, description="Lookback window size")
     pred_len: int = Field(default=120, ge=30, le=180, description="Prediction length")
     temperature: float = Field(default=1.0, ge=0.1, le=2.0, description="Prediction temperature")
@@ -140,18 +142,20 @@ def create_kronos_router() -> APIRouter:
     @router.get("/model-status", response_model=SuccessResponse[ModelStatusResponse])
     async def get_model_status():
         """Get current model status."""
-        global _predictor
+        global _predictor, _current_model_key
         
         if MODEL_AVAILABLE:
             if _predictor is not None:
+                model_info = AVAILABLE_MODELS.get(_current_model_key, {})
                 return SuccessResponse.create(
                     data=ModelStatusResponse(
                         available=True,
                         loaded=True,
                         message="Kronos model loaded and available",
                         current_model={
-                            "name": _predictor.model.__class__.__name__,
-                            "device": str(next(_predictor.model.parameters()).device)
+                            "name": model_info.get("name", _predictor.model.__class__.__name__),
+                            "device": str(next(_predictor.model.parameters()).device),
+                            "model_key": _current_model_key
                         }
                     )
                 )
@@ -185,7 +189,7 @@ def create_kronos_router() -> APIRouter:
     @router.post("/load-model", response_model=SuccessResponse)
     async def load_model(request: LoadModelRequest):
         """Load a Kronos model."""
-        global _tokenizer, _model, _predictor
+        global _tokenizer, _model, _predictor, _current_model_key
         
         if not MODEL_AVAILABLE:
             return SuccessResponse.create(
@@ -203,6 +207,7 @@ def create_kronos_router() -> APIRouter:
             _tokenizer = KronosTokenizer.from_pretrained(model_config['tokenizer_id'])
             _model = Kronos.from_pretrained(model_config['model_id'])
             _predictor = KronosPredictor(_model, _tokenizer, device=request.device, max_context=model_config['context_length'])
+            _current_model_key = request.model_key
             
             return SuccessResponse.create(
                 msg=f"Model loaded: {model_config['name']} ({model_config['params']}) on {request.device}"
@@ -216,7 +221,7 @@ def create_kronos_router() -> APIRouter:
     @router.post("/predict", response_model=SuccessResponse[PredictionResponse])
     async def predict(request: PredictionRequest):
         """Run Kronos prediction for a stock."""
-        global _predictor, _tokenizer, _model
+        global _predictor, _tokenizer, _model, _current_model_key
         
         if not MODEL_AVAILABLE:
             return SuccessResponse.create(
@@ -230,14 +235,21 @@ def create_kronos_router() -> APIRouter:
                 )
             )
         
-        # Auto-load model if not loaded
-        if _predictor is None:
+        # Get requested model key
+        requested_model_key = request.model_key
+        if requested_model_key not in AVAILABLE_MODELS:
+            requested_model_key = 'kronos-base'
+        
+        # Load or switch model if needed
+        if _predictor is None or _current_model_key != requested_model_key:
             try:
-                model_config = AVAILABLE_MODELS['kronos-base']
+                model_config = AVAILABLE_MODELS[requested_model_key]
+                logger.info(f"Loading model: {requested_model_key}")
                 _tokenizer = KronosTokenizer.from_pretrained(model_config['tokenizer_id'])
                 _model = Kronos.from_pretrained(model_config['model_id'])
                 _predictor = KronosPredictor(_model, _tokenizer, device='cpu', max_context=model_config['context_length'])
-                logger.info("Auto-loaded kronos-base model")
+                _current_model_key = requested_model_key
+                logger.info(f"Model loaded: {model_config['name']}")
             except Exception as e:
                 logger.error(f"Failed to auto-load model: {e}")
                 return SuccessResponse.create(
