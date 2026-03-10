@@ -11,6 +11,7 @@ from .asset import Asset
 
 # Import base model
 from .base import Base
+from .python_strategy import PythonStrategy
 from .strategy import Strategy
 from .strategy_compose_cycle import StrategyComposeCycle
 from .strategy_detail import StrategyDetail
@@ -25,6 +26,7 @@ __all__ = [
     "Base",
     "Agent",
     "Asset",
+    "PythonStrategy",
     "Strategy",
     "Watchlist",
     "WatchlistItem",

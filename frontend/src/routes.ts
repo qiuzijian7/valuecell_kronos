@@ -40,6 +40,8 @@ export default [
     ]),
   ]),
 
+  route("/python-strategy", "app/python-strategy/python-strategy.tsx"),
+
   // router for test components
   route("/test", "app/test.tsx"),
 ] satisfies RouteConfig;

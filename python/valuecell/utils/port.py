@@ -6,7 +6,8 @@ def get_next_available_port(start: int = 10000, num: int = 1000) -> int:
     for port in range(start, start + num):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             try:
-                s.bind(("localhost", port))
+                # Bind to 127.0.0.1 explicitly to match uvicorn's default binding
+                s.bind(("127.0.0.1", port))
                 return port
             except OSError:
                 continue

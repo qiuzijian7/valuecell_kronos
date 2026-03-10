@@ -1,6 +1,7 @@
 import BackButton from "@valuecell/button/back-button";
+import TradingViewAdvancedChart from "@/components/tradingview/tradingview-advanced-chart";
 import { useTheme } from "next-themes";
-import { memo, useState, useEffect } from "react";
+import { memo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useGetStockDetail } from "@/api/stock";
@@ -9,6 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import PredictionChart from "./components/prediction-chart";
 import type { Route } from "./+types/stock-prediction";
+
+type ChartView = "kline" | "prediction";
 
 function StockPrediction() {
   const { t, i18n } = useTranslation();
@@ -19,10 +22,14 @@ function StockPrediction() {
   const [predictionParams, setPredictionParams] = useState({
     model_key: "kronos-base",
     lookback: 400,
-    pred_len: 120,
-    temperature: 1.0,
+    pred_len: 60,
+    temperature: 0.6,
     top_p: 0.9,
+    sample_count: 3,
   });
+
+  // Chart view: show K-line by default, switch to prediction after results
+  const [chartView, setChartView] = useState<ChartView>("kline");
 
   // Fetch available models
   const { data: availableModels } = useKronosAvailableModels();
@@ -48,9 +55,21 @@ function StockPrediction() {
     ...predictionParams,
   });
 
-  const handlePredict = () => {
+  const handlePredict = useCallback(() => {
     runPrediction();
-  };
+  }, [runPrediction]);
+
+  // Auto-switch to prediction chart when results arrive
+  useEffect(() => {
+    if (predictionData?.success) {
+      setChartView("prediction");
+    }
+  }, [predictionData]);
+
+  // Reset to K-line view when switching stocks
+  useEffect(() => {
+    setChartView("kline");
+  }, [ticker]);
 
   // Handle loading states
   if (isDetailLoading) {
@@ -146,6 +165,8 @@ function StockPrediction() {
             }
             className="rounded border border-border bg-background px-2 py-1 text-sm"
           >
+            <option value={20}>20</option>
+            <option value={30}>30</option>
             <option value={60}>60</option>
             <option value={120}>120</option>
             <option value={180}>180</option>
@@ -170,6 +191,28 @@ function StockPrediction() {
             }
             className="w-16 rounded border border-border bg-background px-2 py-1 text-sm"
           />
+        </div>
+
+        <div className="flex items-center gap-2">
+          <label className="text-sm text-muted-foreground">
+            {t("prediction.sampleCount", "采样次数")}:
+          </label>
+          <select
+            value={predictionParams.sample_count}
+            onChange={(e) =>
+              setPredictionParams((p) => ({
+                ...p,
+                sample_count: Number(e.target.value),
+              }))
+            }
+            className="rounded border border-border bg-background px-2 py-1 text-sm"
+          >
+            <option value={1}>1</option>
+            <option value={3}>3</option>
+            <option value={5}>5</option>
+            <option value={8}>8</option>
+            <option value={10}>10</option>
+          </select>
         </div>
 
         <Button
@@ -213,8 +256,37 @@ function StockPrediction() {
         </div>
       )}
 
-      {/* Prediction Chart */}
-      <div className="flex-1">
+      {/* Chart View Toggle + Chart Area */}
+      <div className="flex-1 flex flex-col gap-2">
+        {/* Tab switcher — only show when prediction data exists */}
+        {predictionData?.success && (
+          <div className="flex gap-1 rounded-lg bg-muted p-1 self-start">
+            <button
+              type="button"
+              onClick={() => setChartView("kline")}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                chartView === "kline"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t("prediction.klineChart", "K线图")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setChartView("prediction")}
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                chartView === "prediction"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t("prediction.predictionChart", "预测图")}
+            </button>
+          </div>
+        )}
+
+        {/* Chart content */}
         {isPredicting ? (
           <div className="flex h-[420px] items-center justify-center">
             <div className="text-center">
@@ -222,7 +294,7 @@ function StockPrediction() {
               <p className="text-muted-foreground">{t("prediction.analyzing")}</p>
             </div>
           </div>
-        ) : predictionData ? (
+        ) : chartView === "prediction" && predictionData ? (
           <PredictionChart
             predictionData={predictionData}
             ticker={ticker}
@@ -230,16 +302,12 @@ function StockPrediction() {
             locale={i18n.language}
           />
         ) : (
-          <div className="flex h-[420px] items-center justify-center rounded-lg border border-dashed border-border">
-            <div className="text-center">
-              <p className="mb-2 text-lg font-medium text-foreground">
-                {t("prediction.noData")}
-              </p>
-              <p className="text-muted-foreground">
-                {t("prediction.clickToStart")}
-              </p>
-            </div>
-          </div>
+          <TradingViewAdvancedChart
+            ticker={ticker}
+            theme={resolvedTheme === "dark" ? "dark" : "light"}
+            locale={i18n.language.replace("_", "-")}
+            minHeight={480}
+          />
         )}
       </div>
 

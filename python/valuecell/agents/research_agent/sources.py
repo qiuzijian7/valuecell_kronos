@@ -89,6 +89,8 @@ async def _write_and_ingest(
     knowledge_dir.mkdir(parents=True, exist_ok=True)
     results: List[SECFilingResult] = []
     for filing in filings:
+        if filing is None:
+            continue
         filing_date: str = filing.filing_date.strftime("%Y-%m-%d")
         period_of_report: str = getattr(filing, "period_of_report", "")
         # Convert to markdown; fall back to string if markdown unavailable

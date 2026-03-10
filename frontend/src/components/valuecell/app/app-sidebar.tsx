@@ -17,6 +17,7 @@ import {
   Setting,
   StrategyAgent,
 } from "@/assets/svg";
+import { Code2 } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
@@ -174,6 +175,12 @@ const AppSidebar: FC = () => {
           label: t("nav.market"),
           to: "/market",
         },
+        {
+          id: "python-strategy",
+          icon: null,
+          label: "Python Strategy",
+          to: "/python-strategy",
+        },
       ],
       config: [
         {
@@ -210,7 +217,11 @@ const AppSidebar: FC = () => {
                   data-active={verifyActive(item.to)}
                   className="p-2"
                 >
-                  <SvgIcon name={item.icon} />
+                  {item.icon ? (
+                    <SvgIcon name={item.icon} />
+                  ) : (
+                    <Code2 className="size-5" />
+                  )}
                 </SidebarMenuItem>
               </NavLink>
             );

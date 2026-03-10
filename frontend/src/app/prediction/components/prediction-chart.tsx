@@ -53,6 +53,8 @@ function PredictionChart({
   theme = "light",
   locale = "en",
 }: PredictionChartProps) {
+  // Convert locale to BCP 47 format (e.g. "zh_CN" -> "zh-CN")
+  const bcp47Locale = locale.replace("_", "-");
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [plotlyReady, setPlotlyReady] = useState(plotlyLoaded);
 
@@ -206,7 +208,7 @@ function PredictionChart({
                       className="border-t border-border hover:bg-muted/50"
                     >
                       <td className="px-3 py-2 text-foreground">
-                        {new Date(pred.timestamp).toLocaleDateString(locale)}
+                        {new Date(pred.timestamp).toLocaleDateString(bcp47Locale)}
                       </td>
                       <td className="px-3 py-2 text-right text-foreground">
                         {pred.open.toFixed(2)}

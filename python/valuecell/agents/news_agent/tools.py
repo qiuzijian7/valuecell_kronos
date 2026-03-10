@@ -16,7 +16,8 @@ async def web_search(query: str) -> str:
     This function uses the centralized configuration system to create model instances.
     It supports multiple search providers:
     - Google (Gemini with search enabled) - when WEB_SEARCH_PROVIDER=google and GOOGLE_API_KEY is set
-    - Perplexity (via OpenRouter) - default fallback
+    - Perplexity (via OpenRouter) - when OPENROUTER_API_KEY is set
+    - Fallback to primary provider (no real-time search)
 
     Args:
         query: The search query string.
@@ -24,20 +25,32 @@ async def web_search(query: str) -> str:
     Returns:
         A summary of the top search results.
     """
-    # Check which provider to use based on environment configuration
+    # Option 1: Google Gemini with search grounding
     if os.getenv("WEB_SEARCH_PROVIDER", "google").lower() == "google" and os.getenv(
         "GOOGLE_API_KEY"
     ):
         return await _web_search_google(query)
 
-    # Use Perplexity Sonar via OpenRouter for web search
-    # Perplexity models are optimized for web search and real-time information
-    model = create_model(
-        provider="openrouter",
-        model_id="perplexity/sonar",
-        max_tokens=None,
+    # Option 2: Perplexity Sonar via OpenRouter
+    if os.getenv("OPENROUTER_API_KEY"):
+        model = create_model(
+            provider="openrouter",
+            model_id="perplexity/sonar",
+            max_tokens=None,
+            use_fallback=False,
+        )
+        response = await Agent(model=model).arun(query)
+        return response.content
+
+    # Option 3: Fallback to primary provider (no real-time search capability)
+    logger.warning(
+        "No web search provider configured (GOOGLE_API_KEY or OPENROUTER_API_KEY). "
+        "Using primary provider without real-time search."
     )
-    response = await Agent(model=model).arun(query)
+    model = create_model()
+    response = await Agent(model=model).arun(
+        f"Based on your knowledge, provide information about: {query}"
+    )
     return response.content
 
 

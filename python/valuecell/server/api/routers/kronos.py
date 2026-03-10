@@ -78,10 +78,10 @@ class PredictionRequest(BaseModel):
     ticker: str = Field(..., description="Stock ticker symbol")
     model_key: str = Field(default="kronos-base", description="Model key to use for prediction")
     lookback: int = Field(default=400, ge=100, le=512, description="Lookback window size")
-    pred_len: int = Field(default=120, ge=30, le=180, description="Prediction length")
-    temperature: float = Field(default=1.0, ge=0.1, le=2.0, description="Prediction temperature")
+    pred_len: int = Field(default=60, ge=10, le=180, description="Prediction length")
+    temperature: float = Field(default=0.6, ge=0.1, le=2.0, description="Prediction temperature")
     top_p: float = Field(default=0.9, ge=0.1, le=1.0, description="Top-p sampling parameter")
-    sample_count: int = Field(default=1, ge=1, le=5, description="Number of samples")
+    sample_count: int = Field(default=3, ge=1, le=10, description="Number of samples for ensemble averaging")
 
 
 class LoadModelRequest(BaseModel):
@@ -264,19 +264,12 @@ def create_kronos_router() -> APIRouter:
                 )
         
         try:
-            # Fetch stock data using yfinance
-            import yfinance as yf
-            
-            ticker = request.ticker
-            # Handle ticker format (e.g., "NASDAQ:AAPL" -> "AAPL")
-            if ":" in ticker:
-                ticker = ticker.split(":")[1]
-            
-            # Download historical data
-            stock = yf.Ticker(ticker)
-            df = stock.history(period="2y", interval="1d")
-            
-            if df.empty:
+            # Fetch stock data using Yahoo Finance REST API (avoids yfinance rate limits)
+            from valuecell.utils.stock_data import fetch_ohlcv
+
+            try:
+                df = fetch_ohlcv(request.ticker, period="2y", interval="1d")
+            except (ValueError, ConnectionError) as data_err:
                 return SuccessResponse.create(
                     data=PredictionResponse(
                         success=False,
@@ -284,17 +277,13 @@ def create_kronos_router() -> APIRouter:
                         prediction_results=[],
                         actual_data=[],
                         has_comparison=False,
-                        message=f"No data available for ticker: {request.ticker}"
+                        message=f"No data available for ticker: {request.ticker} ({data_err})"
                     )
                 )
-            
-            # Prepare data
-            df = df.reset_index()
+
+            # Prepare data — fetch_ohlcv returns capitalized columns with a Date column
             df.columns = [c.lower() for c in df.columns]
-            if 'date' in df.columns:
-                df['timestamps'] = pd.to_datetime(df['date'])
-            elif 'datetime' in df.columns:
-                df['timestamps'] = pd.to_datetime(df['datetime'])
+            df['timestamps'] = pd.to_datetime(df['date'])
             
             # Check data length and auto-adjust parameters if needed
             total_needed = request.lookback + request.pred_len
@@ -372,6 +361,9 @@ def create_kronos_router() -> APIRouter:
             
             logger.info(f"Prediction returned {len(pred_df)} points")
             
+            # Post-processing: constrain trend deviation to reduce drift
+            pred_df = _postprocess_predictions(pred_df, x_df, actual_pred_len)
+            
             # Prepare results - use generated future timestamps
             prediction_results = []
             for i, (_, row) in enumerate(pred_df.iterrows()):
@@ -428,6 +420,86 @@ def create_kronos_router() -> APIRouter:
             )
 
     return router
+
+
+import numpy as np
+
+
+def _postprocess_predictions(
+    pred_df: pd.DataFrame,
+    hist_df: pd.DataFrame,
+    pred_len: int,
+) -> pd.DataFrame:
+    """Post-process predictions to constrain trend deviation and fix anomalies.
+
+    Three steps:
+    1. Continuity anchoring — shift the first predicted bar so its open aligns
+       with the last historical close, then propagate the offset.
+    2. OHLC consistency — enforce high >= max(open, close) and
+       low <= min(open, close) for every bar.
+    3. Trend deviation clamping — limit per-step change to a multiple of the
+       recent historical daily volatility, preventing run-away drift.
+    """
+    price_cols = ["open", "high", "low", "close"]
+    result = pred_df.copy()
+
+    # --- 1. Continuity anchoring ---
+    last_close = float(hist_df["close"].iloc[-1])
+    first_pred_open = float(result["open"].iloc[0])
+    anchor_offset = last_close - first_pred_open
+    for col in price_cols:
+        result[col] = result[col] + anchor_offset
+
+    # --- 2. Compute historical volatility for clamping ---
+    hist_closes = hist_df["close"].values.astype(np.float64)
+    # Use recent 60 days rolling std of daily returns as volatility measure
+    recent_n = min(60, len(hist_closes) - 1)
+    if recent_n > 1:
+        daily_returns = np.diff(hist_closes[-recent_n - 1:]) / hist_closes[-recent_n - 1:-1]
+        hist_volatility = float(np.std(daily_returns))
+    else:
+        hist_volatility = 0.02  # fallback 2%
+
+    # Maximum allowed per-step change as a fraction of current price
+    # Use 3x historical daily volatility as the envelope
+    max_daily_change_pct = max(hist_volatility * 3.0, 0.03)  # at least 3%
+
+    # --- 3. Trend deviation clamping ---
+    prev_close = last_close
+    for i in range(len(result)):
+        for col in price_cols:
+            val = float(result.iloc[i][col])
+            max_change = prev_close * max_daily_change_pct
+            clamped = np.clip(val, prev_close - max_change, prev_close + max_change)
+            result.iloc[i, result.columns.get_loc(col)] = clamped
+        prev_close = float(result.iloc[i]["close"])
+
+    # --- 4. OHLC consistency ---
+    for i in range(len(result)):
+        o = float(result.iloc[i]["open"])
+        h = float(result.iloc[i]["high"])
+        l = float(result.iloc[i]["low"])
+        c = float(result.iloc[i]["close"])
+        body_hi = max(o, c)
+        body_lo = min(o, c)
+        h = max(h, body_hi)
+        l = min(l, body_lo)
+        result.iloc[i, result.columns.get_loc("high")] = h
+        result.iloc[i, result.columns.get_loc("low")] = l
+
+    # Ensure volume / amount stay non-negative
+    if "volume" in result.columns:
+        result["volume"] = result["volume"].clip(lower=0)
+    if "amount" in result.columns:
+        result["amount"] = result["amount"].clip(lower=0)
+
+    logger.info(
+        "Post-processed {n} predictions: anchor_offset={off:.4f}, max_daily_change_pct={pct:.4f}",
+        n=len(result),
+        off=anchor_offset,
+        pct=max_daily_change_pct,
+    )
+    return result
 
 
 def _create_prediction_chart(df, pred_df, lookback, pred_len, actual_df, start_idx, pred_timestamps=None):
