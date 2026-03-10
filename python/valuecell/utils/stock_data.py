@@ -1,12 +1,13 @@
-"""Direct Yahoo Finance REST API data fetcher.
+"""Stock OHLCV data fetcher with local database caching.
 
-Bypasses the yfinance library to avoid rate limiting issues.
-Uses the Yahoo Finance v8 chart API with User-Agent rotation and retry logic.
+Fetches data from Yahoo Finance REST API and caches it in the local
+SQLite database. Subsequent requests are served from the cache when fresh,
+with incremental updates for missing date ranges only.
 """
 
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import pandas as pd
@@ -91,11 +92,17 @@ def fetch_ohlcv(
     period: Optional[str] = None,
     interval: str = "1d",
     timeout: float = DEFAULT_TIMEOUT_S,
+    use_cache: bool = True,
 ) -> pd.DataFrame:
-    """Fetch OHLCV data from Yahoo Finance REST API.
+    """Fetch OHLCV data, using local DB cache when available.
 
-    Either *period* **or** *start_date*/*end_date* should be provided.
-    When *period* is given, the date range is computed automatically.
+    Flow:
+    1. Resolve the requested date range.
+    2. If ``use_cache`` is True and interval is daily, query the local
+       database for cached bars.
+    3. If the cache fully covers the range and is fresh, return it.
+    4. Otherwise, fetch only the missing date ranges from Yahoo Finance,
+       store the new bars in the cache, and return the merged result.
 
     Args:
         ticker: Stock symbol in internal format (``EXCHANGE:SYMBOL``) or
@@ -106,6 +113,8 @@ def fetch_ohlcv(
             Takes precedence over *start_date*/*end_date*.
         interval: Data interval (``1d``, ``1h``, ``5m``, etc.).
         timeout: HTTP request timeout in seconds.
+        use_cache: Whether to use local DB caching (default True).
+            Only effective for daily (``1d``) interval.
 
     Returns:
         DataFrame with columns: ``Date``, ``Open``, ``High``, ``Low``,
@@ -115,26 +124,192 @@ def fetch_ohlcv(
         ValueError: If no data is returned.
         ConnectionError: If the HTTP request fails after retries.
     """
+    # Resolve target date range ------------------------------------------
+    target_start, target_end = _resolve_date_range(start_date, end_date, period)
+
+    # Only cache daily data — intraday data changes too fast
+    can_cache = use_cache and interval == "1d"
+
+    if can_cache:
+        try:
+            return _fetch_with_cache(ticker, target_start, target_end, interval, timeout)
+        except Exception as cache_err:
+            logger.warning(
+                "Cache fetch failed for {t}, falling back to remote: {err}",
+                t=ticker,
+                err=str(cache_err),
+            )
+
+    # Fallback: direct remote fetch
+    return _fetch_remote_ohlcv(
+        ticker,
+        start_date=target_start.isoformat(),
+        end_date=target_end.isoformat(),
+        interval=interval,
+        timeout=timeout,
+    )
+
+
+def _resolve_date_range(
+    start_date: Optional[str],
+    end_date: Optional[str],
+    period: Optional[str],
+) -> tuple[date, date]:
+    """Convert period / start_date / end_date into a concrete (start, end) pair."""
+    now = datetime.now()
+    resolved_end = now.date()
+
+    if period is not None:
+        period_deltas = {
+            "1d": timedelta(days=1),
+            "5d": timedelta(days=5),
+            "1mo": timedelta(days=30),
+            "3mo": timedelta(days=90),
+            "6mo": timedelta(days=180),
+            "1y": timedelta(days=365),
+            "2y": timedelta(days=730),
+            "5y": timedelta(days=1825),
+            "10y": timedelta(days=3650),
+            "ytd": timedelta(days=(now - datetime(now.year, 1, 1)).days),
+        }
+        if period == "max":
+            resolved_start = date(1970, 1, 1)
+        elif period in period_deltas:
+            resolved_start = (now - period_deltas[period]).date()
+        else:
+            try:
+                days = int(period.rstrip("d"))
+                resolved_start = (now - timedelta(days=days)).date()
+            except ValueError:
+                resolved_start = (now - timedelta(days=365)).date()
+        return resolved_start, resolved_end
+
+    if end_date is not None:
+        resolved_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    if start_date is not None:
+        resolved_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    else:
+        resolved_start = (datetime.now() - timedelta(days=365)).date()
+
+    return resolved_start, resolved_end
+
+
+def _fetch_with_cache(
+    ticker: str,
+    target_start: date,
+    target_end: date,
+    interval: str,
+    timeout: float,
+) -> pd.DataFrame:
+    """Try to serve from cache; fetch missing ranges from remote."""
+    from valuecell.server.db.connection import get_database_manager
+    from valuecell.server.db.repositories.stock_ohlcv_repository import (
+        StockOHLCVRepository,
+        get_stock_ohlcv_repository,
+    )
+
+    repo = get_stock_ohlcv_repository()
+    db_manager = get_database_manager()
+    session = db_manager.get_session()
+
+    try:
+        cached_start, cached_end = repo.get_cached_range(session, ticker, interval)
+
+        # If cache is fresh enough, serve directly
+        if cached_start is not None and cached_end is not None:
+            if (
+                cached_start <= target_start
+                and repo.is_cache_fresh(cached_end, target_end)
+            ):
+                df = repo.query_bars(session, ticker, target_start, target_end, interval)
+                if not df.empty:
+                    logger.info(
+                        "Cache hit for {t}: {n} bars ({s} ~ {e})",
+                        t=ticker,
+                        n=len(df),
+                        s=target_start,
+                        e=target_end,
+                    )
+                    return df
+
+        # Compute what's missing
+        missing_ranges = repo.compute_missing_range(
+            cached_start, cached_end, target_start, target_end
+        )
+
+        if not missing_ranges:
+            # Everything is cached
+            df = repo.query_bars(session, ticker, target_start, target_end, interval)
+            if not df.empty:
+                return df
+
+        # Fetch missing ranges from remote and store
+        for range_start, range_end in missing_ranges:
+            try:
+                remote_df = _fetch_remote_ohlcv(
+                    ticker,
+                    start_date=range_start.isoformat(),
+                    end_date=range_end.isoformat(),
+                    interval=interval,
+                    timeout=timeout,
+                )
+                if not remote_df.empty:
+                    repo.upsert_bars(session, ticker, remote_df, interval)
+            except (ValueError, ConnectionError) as fetch_err:
+                logger.warning(
+                    "Failed to fetch range {s}~{e} for {t}: {err}",
+                    s=range_start,
+                    e=range_end,
+                    t=ticker,
+                    err=str(fetch_err),
+                )
+
+        # Now serve the full range from cache
+        df = repo.query_bars(session, ticker, target_start, target_end, interval)
+        if df.empty:
+            raise ValueError(f"No data available for {ticker} after cache update")
+
+        logger.info(
+            "Serving {n} bars for {t} from cache ({s} ~ {e})",
+            n=len(df),
+            t=ticker,
+            s=target_start,
+            e=target_end,
+        )
+        return df
+    finally:
+        session.close()
+
+
+def _fetch_remote_ohlcv(
+    ticker: str,
+    *,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    interval: str = "1d",
+    timeout: float = DEFAULT_TIMEOUT_S,
+) -> pd.DataFrame:
+    """Fetch OHLCV data directly from Yahoo Finance REST API.
+
+    This is the raw remote fetcher — no caching involved.
+    """
     yahoo_symbol = _convert_ticker_to_yahoo(ticker)
 
     # Build timestamps ---------------------------------------------------
-    if period is not None:
-        params = _build_period_params(period, interval)
-    else:
-        if end_date is None:
-            end_date = datetime.now().strftime("%Y-%m-%d")
-        if start_date is None:
-            start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+    if end_date is None:
+        end_date = datetime.now().strftime("%Y-%m-%d")
+    if start_date is None:
+        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
 
-        period1 = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
-        period2 = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp()) + 86400
-        params = {
-            "period1": period1,
-            "period2": period2,
-            "interval": interval,
-            "includePrePost": "false",
-            "events": "div,splits",
-        }
+    period1 = int(datetime.strptime(start_date, "%Y-%m-%d").timestamp())
+    period2 = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp()) + 86400
+    params = {
+        "period1": period1,
+        "period2": period2,
+        "interval": interval,
+        "includePrePost": "false",
+        "events": "div,splits",
+    }
 
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yahoo_symbol}"
 
@@ -214,7 +389,7 @@ def fetch_ohlcv(
         raise ValueError(f"All rows contained NaN for {ticker}")
 
     logger.info(
-        "Fetched {n} bars for {t} ({s}), range {start} ~ {end}",
+        "Fetched {n} bars for {t} ({s}) from Yahoo Finance, range {start} ~ {end}",
         n=len(df),
         t=ticker,
         s=yahoo_symbol,
@@ -224,41 +399,4 @@ def fetch_ohlcv(
     return df
 
 
-def _build_period_params(period: str, interval: str) -> dict:
-    """Convert a period string to query parameters with timestamps."""
-    now = datetime.now()
 
-    period_deltas = {
-        "1d": timedelta(days=1),
-        "5d": timedelta(days=5),
-        "1mo": timedelta(days=30),
-        "3mo": timedelta(days=90),
-        "6mo": timedelta(days=180),
-        "1y": timedelta(days=365),
-        "2y": timedelta(days=730),
-        "5y": timedelta(days=1825),
-        "10y": timedelta(days=3650),
-        "ytd": timedelta(days=(now - datetime(now.year, 1, 1)).days),
-    }
-
-    if period == "max":
-        period1 = 0
-    elif period in period_deltas:
-        period1 = int((now - period_deltas[period]).timestamp())
-    else:
-        # Fallback: try to parse as Nd (e.g. "730d")
-        try:
-            days = int(period.rstrip("d"))
-            period1 = int((now - timedelta(days=days)).timestamp())
-        except ValueError:
-            period1 = int((now - timedelta(days=365)).timestamp())
-
-    period2 = int(now.timestamp()) + 86400
-
-    return {
-        "period1": period1,
-        "period2": period2,
-        "interval": interval,
-        "includePrePost": "false",
-        "events": "div,splits",
-    }

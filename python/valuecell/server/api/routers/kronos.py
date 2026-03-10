@@ -114,6 +114,7 @@ class PredictionResponse(BaseModel):
     success: bool
     prediction_type: str
     chart: Optional[str] = None
+    historical_data: list[PredictionResult] = []
     prediction_results: list[PredictionResult]
     actual_data: list[PredictionResult]
     has_comparison: bool
@@ -133,6 +134,42 @@ class AvailableModelsResponse(BaseModel):
     """Available models response."""
     models: dict
     model_available: bool
+
+
+class PatternMatchItem(BaseModel):
+    """Single candlestick pattern detection."""
+    index: int
+    date: str
+    name: str
+    label: str
+    sentiment: str  # bullish / bearish / neutral
+    confidence: float
+
+
+class OHLCVBar(BaseModel):
+    """OHLCV bar for chart data."""
+    date: str
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: Optional[float] = None
+
+
+class PatternRecognitionRequest(BaseModel):
+    """Request for pattern recognition."""
+    ticker: str = Field(..., description="Stock ticker symbol")
+    period: str = Field(default="1y", description="Data period (6mo, 1y, 2y)")
+    last_n: Optional[int] = Field(default=60, description="Scan only last N bars for patterns")
+
+
+class PatternRecognitionResponse(BaseModel):
+    """Response with detected patterns and chart data."""
+    success: bool
+    ticker: str
+    patterns: list[PatternMatchItem]
+    ohlcv: list[OHLCVBar]
+    message: str
 
 
 def create_kronos_router() -> APIRouter:
@@ -380,17 +417,25 @@ def create_kronos_router() -> APIRouter:
             # No actual data for future predictions
             actual_data = []
             
-            # Create chart JSON
-            chart_data = _create_prediction_chart(
-                df, pred_df, actual_lookback, actual_pred_len, 
-                None, len(df) - actual_lookback, future_timestamps
-            )
+            # Build historical data for frontend chart rendering
+            hist_df = df.iloc[len(df) - actual_lookback:]
+            historical_data = []
+            for _, hrow in hist_df.iterrows():
+                historical_data.append(PredictionResult(
+                    timestamp=hrow['timestamps'].isoformat() if hasattr(hrow['timestamps'], 'isoformat') else str(hrow['timestamps']),
+                    open=float(hrow['open']),
+                    high=float(hrow['high']),
+                    low=float(hrow['low']),
+                    close=float(hrow['close']),
+                    volume=float(hrow['volume']) if 'volume' in hrow else 0,
+                ))
             
             return SuccessResponse.create(
                 data=PredictionResponse(
                     success=True,
                     prediction_type=f"Kronos prediction for {request.ticker}",
-                    chart=chart_data,
+                    chart=None,
+                    historical_data=historical_data,
                     prediction_results=prediction_results,
                     actual_data=actual_data,
                     has_comparison=len(actual_data) > 0,
@@ -418,6 +463,63 @@ def create_kronos_router() -> APIRouter:
                     message=f"Prediction failed: {str(e)}"
                 )
             )
+
+    @router.post("/patterns", response_model=SuccessResponse[PatternRecognitionResponse])
+    async def detect_patterns(request: PatternRecognitionRequest):
+        """Detect candlestick patterns for a stock."""
+        from valuecell.utils.candlestick_patterns import detect_patterns as run_detection
+        from valuecell.utils.stock_data import fetch_ohlcv
+
+        try:
+            df = fetch_ohlcv(request.ticker, period=request.period, interval="1d")
+        except (ValueError, ConnectionError) as err:
+            return SuccessResponse.create(
+                data=PatternRecognitionResponse(
+                    success=False,
+                    ticker=request.ticker,
+                    patterns=[],
+                    ohlcv=[],
+                    message=f"Failed to fetch data: {err}",
+                )
+            )
+
+        # Detect patterns
+        matches = run_detection(df, last_n=request.last_n)
+
+        # Build OHLCV bars for frontend chart
+        ohlcv_bars = [
+            OHLCVBar(
+                date=row["Date"].strftime("%Y-%m-%d") if hasattr(row["Date"], "strftime") else str(row["Date"]),
+                open=float(row["Open"]),
+                high=float(row["High"]),
+                low=float(row["Low"]),
+                close=float(row["Close"]),
+                volume=float(row["Volume"]) if pd.notna(row.get("Volume")) else None,
+            )
+            for _, row in df.iterrows()
+        ]
+
+        pattern_items = [
+            PatternMatchItem(
+                index=m.index,
+                date=m.date,
+                name=m.name,
+                label=m.label,
+                sentiment=m.sentiment,
+                confidence=m.confidence,
+            )
+            for m in matches
+        ]
+
+        return SuccessResponse.create(
+            data=PatternRecognitionResponse(
+                success=True,
+                ticker=request.ticker,
+                patterns=pattern_items,
+                ohlcv=ohlcv_bars,
+                message=f"Detected {len(pattern_items)} patterns in last {request.last_n or len(df)} bars",
+            )
+        )
 
     return router
 
@@ -502,84 +604,4 @@ def _postprocess_predictions(
     return result
 
 
-def _create_prediction_chart(df, pred_df, lookback, pred_len, actual_df, start_idx, pred_timestamps=None):
-    """Create a Plotly chart JSON for the prediction results."""
-    import json
-    
-    try:
-        import plotly.graph_objects as go
-        
-        # Historical data
-        hist_df = df.iloc[start_idx:start_idx + lookback].copy()
-        
-        fig = go.Figure()
-        
-        # Convert timestamps to string format for Plotly
-        hist_x = [ts.strftime('%Y-%m-%d') for ts in hist_df['timestamps']]
-        
-        # Historical candlestick
-        fig.add_trace(go.Candlestick(
-            x=hist_x,
-            open=hist_df['open'].tolist(),
-            high=hist_df['high'].tolist(),
-            low=hist_df['low'].tolist(),
-            close=hist_df['close'].tolist(),
-            name='Historical',
-            increasing_line_color='#26A69A',
-            decreasing_line_color='#EF5350'
-        ))
-        
-        # Prediction candlestick
-        if pred_df is not None and len(pred_df) > 0:
-            # Use provided timestamps or generate new ones
-            if pred_timestamps is not None:
-                pred_x = [ts.strftime('%Y-%m-%d') for ts in pred_timestamps[:len(pred_df)]]
-            else:
-                last_ts = hist_df['timestamps'].iloc[-1]
-                time_diff = hist_df['timestamps'].iloc[1] - hist_df['timestamps'].iloc[0] if len(hist_df) > 1 else pd.Timedelta(days=1)
-                generated_timestamps = pd.date_range(start=last_ts + time_diff, periods=len(pred_df), freq='B')
-                pred_x = [ts.strftime('%Y-%m-%d') for ts in generated_timestamps]
-            
-            fig.add_trace(go.Candlestick(
-                x=pred_x,
-                open=[float(x) for x in pred_df['open'].tolist()],
-                high=[float(x) for x in pred_df['high'].tolist()],
-                low=[float(x) for x in pred_df['low'].tolist()],
-                close=[float(x) for x in pred_df['close'].tolist()],
-                name='Prediction',
-                increasing_line_color='#66BB6A',
-                decreasing_line_color='#FF7043'
-            ))
-        
-        # Actual data
-        if actual_df is not None and len(actual_df) > 0:
-            actual_x = [ts.strftime('%Y-%m-%d') for ts in actual_df['timestamps']]
-            fig.add_trace(go.Candlestick(
-                x=actual_x,
-                open=actual_df['open'].tolist(),
-                high=actual_df['high'].tolist(),
-                low=actual_df['low'].tolist(),
-                close=actual_df['close'].tolist(),
-                name='Actual',
-                increasing_line_color='#FF9800',
-                decreasing_line_color='#F44336'
-            ))
-        
-        fig.update_layout(
-            title='Kronos Prediction Results',
-            xaxis_title='Time',
-            yaxis_title='Price',
-            template='plotly_white',
-            height=420,
-            showlegend=True,
-            xaxis_rangeslider_visible=False
-        )
-        
-        # Convert to dict and then to JSON to avoid binary encoding
-        fig_dict = fig.to_dict()
-        return json.dumps(fig_dict)
-    except Exception as e:
-        logger.error(f"Failed to create chart: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
+

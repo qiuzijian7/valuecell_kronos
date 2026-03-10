@@ -1,14 +1,14 @@
 import BackButton from "@valuecell/button/back-button";
-import TradingViewAdvancedChart from "@/components/tradingview/tradingview-advanced-chart";
 import { useTheme } from "next-themes";
 import { memo, useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { useGetStockDetail } from "@/api/stock";
-import { useKronosPrediction, useKronosAvailableModels, useKronosModelStatus } from "@/api/kronos";
+import { useKronosPrediction, useKronosAvailableModels, useKronosModelStatus, usePatternRecognition } from "@/api/kronos";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import PredictionChart from "./components/prediction-chart";
+import PatternKlineChart from "./components/pattern-kline-chart";
 import type { Route } from "./+types/stock-prediction";
 
 type ChartView = "kline" | "prediction";
@@ -53,6 +53,16 @@ function StockPrediction() {
   } = useKronosPrediction({
     ticker,
     ...predictionParams,
+  });
+
+  // Pattern recognition — auto-fetches when ticker changes
+  const {
+    data: patternData,
+    isLoading: isPatternLoading,
+  } = usePatternRecognition({
+    ticker,
+    period: "1y",
+    last_n: 60,
   });
 
   const handlePredict = useCallback(() => {
@@ -258,20 +268,25 @@ function StockPrediction() {
 
       {/* Chart View Toggle + Chart Area */}
       <div className="flex-1 flex flex-col gap-2">
-        {/* Tab switcher — only show when prediction data exists */}
-        {predictionData?.success && (
-          <div className="flex gap-1 rounded-lg bg-muted p-1 self-start">
-            <button
-              type="button"
-              onClick={() => setChartView("kline")}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                chartView === "kline"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t("prediction.klineChart", "K线图")}
-            </button>
+        {/* Tab switcher — always show for kline+pattern, add prediction tab when data exists */}
+        <div className="flex gap-1 rounded-lg bg-muted p-1 self-start">
+          <button
+            type="button"
+            onClick={() => setChartView("kline")}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              chartView === "kline"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t("prediction.klineChart", "K线图")}
+            {patternData?.patterns && patternData.patterns.length > 0 && (
+              <span className="ml-1 text-xs text-muted-foreground">
+                ({patternData.patterns.length})
+              </span>
+            )}
+          </button>
+          {predictionData?.success && (
             <button
               type="button"
               onClick={() => setChartView("prediction")}
@@ -283,8 +298,8 @@ function StockPrediction() {
             >
               {t("prediction.predictionChart", "预测图")}
             </button>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Chart content */}
         {isPredicting ? (
@@ -301,13 +316,32 @@ function StockPrediction() {
             theme={resolvedTheme === "dark" ? "dark" : "light"}
             locale={i18n.language}
           />
-        ) : (
-          <TradingViewAdvancedChart
-            ticker={ticker}
+        ) : patternData?.success ? (
+          <PatternKlineChart
+            ohlcv={patternData.ohlcv}
+            patterns={patternData.patterns}
+            height={520}
+            loading={isPatternLoading}
             theme={resolvedTheme === "dark" ? "dark" : "light"}
-            locale={i18n.language.replace("_", "-")}
-            minHeight={480}
           />
+        ) : isPatternLoading ? (
+          <div className="flex h-[420px] items-center justify-center">
+            <div className="text-center">
+              <div className="mb-2 h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent mx-auto" />
+              <p className="text-muted-foreground">{t("prediction.loadingChart", "加载K线数据...")}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex h-[420px] items-center justify-center rounded-lg border border-dashed border-border">
+            <div className="text-center">
+              <p className="mb-2 text-lg font-medium text-foreground">
+                {t("prediction.noData")}
+              </p>
+              <p className="text-muted-foreground">
+                {t("prediction.clickToStart")}
+              </p>
+            </div>
+          </div>
         )}
       </div>
 

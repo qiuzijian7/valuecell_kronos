@@ -12,6 +12,7 @@ from .asset import Asset
 # Import base model
 from .base import Base
 from .python_strategy import PythonStrategy
+from .stock_ohlcv import StockOHLCV
 from .strategy import Strategy
 from .strategy_compose_cycle import StrategyComposeCycle
 from .strategy_detail import StrategyDetail
@@ -27,6 +28,7 @@ __all__ = [
     "Agent",
     "Asset",
     "PythonStrategy",
+    "StockOHLCV",
     "Strategy",
     "Watchlist",
     "WatchlistItem",

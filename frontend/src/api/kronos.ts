@@ -24,7 +24,8 @@ export interface PredictionResult {
 export interface KronosPredictionResult {
   success: boolean;
   prediction_type: string;
-  chart: string;
+  chart?: string;
+  historical_data: PredictionResult[];
   prediction_results: PredictionResult[];
   actual_data: PredictionResult[];
   has_comparison: boolean;
@@ -119,5 +120,54 @@ export const useLoadKronosModel = () => {
   return useMutation({
     mutationFn: (params: LoadModelParams) =>
       apiClient.post<ApiResponse<{ message: string }>>("kronos/load-model", params),
+  });
+};
+
+// --- Pattern Recognition ---
+
+export interface PatternMatchItem {
+  index: number;
+  date: string;
+  name: string;
+  label: string;
+  sentiment: "bullish" | "bearish" | "neutral";
+  confidence: number;
+}
+
+export interface OHLCVBar {
+  date: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+}
+
+export interface PatternRecognitionResult {
+  success: boolean;
+  ticker: string;
+  patterns: PatternMatchItem[];
+  ohlcv: OHLCVBar[];
+  message: string;
+}
+
+export interface PatternRecognitionParams {
+  ticker: string;
+  period?: string;
+  last_n?: number;
+}
+
+export const usePatternRecognition = (params: PatternRecognitionParams) => {
+  return useQuery({
+    queryKey: ["kronos", "patterns", params.ticker, params.period ?? "1y"],
+    queryFn: () =>
+      apiClient.post<ApiResponse<PatternRecognitionResult>>("kronos/patterns", {
+        ticker: params.ticker,
+        period: params.period ?? "1y",
+        last_n: params.last_n ?? 60,
+      }),
+    select: (data) => data.data,
+    enabled: !!params.ticker,
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 };

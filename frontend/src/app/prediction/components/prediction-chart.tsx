@@ -1,5 +1,40 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import {
+  CandlestickChart as ECandlestickChart,
+  LineChart,
+} from "echarts/charts";
+import {
+  AxisPointerComponent,
+  DataZoomComponent,
+  GridComponent,
+  LegendComponent,
+  MarkAreaComponent,
+  MarkLineComponent,
+  TooltipComponent,
+  VisualMapComponent,
+} from "echarts/components";
+import type { ECharts } from "echarts/core";
+import * as echarts from "echarts/core";
+import { CanvasRenderer } from "echarts/renderers";
+import type { EChartsOption } from "echarts/types/dist/shared";
+import { memo, useEffect, useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
+import { useChartResize } from "@/hooks/use-chart-resize";
+import { useStockColors } from "@/store/settings-store";
 import type { KronosPredictionResult } from "@/api/kronos";
+
+echarts.use([
+  ECandlestickChart,
+  LineChart,
+  GridComponent,
+  TooltipComponent,
+  AxisPointerComponent,
+  DataZoomComponent,
+  LegendComponent,
+  MarkAreaComponent,
+  MarkLineComponent,
+  VisualMapComponent,
+  CanvasRenderer,
+]);
 
 interface PredictionChartProps {
   predictionData: KronosPredictionResult;
@@ -8,239 +43,348 @@ interface PredictionChartProps {
   locale?: string;
 }
 
-// Track if Plotly is loaded globally
-let plotlyLoaded = false;
-let plotlyLoading = false;
-const plotlyCallbacks: (() => void)[] = [];
-
-function loadPlotly(): Promise<void> {
-  return new Promise((resolve) => {
-    if (plotlyLoaded && window.Plotly) {
-      resolve();
-      return;
-    }
-
-    if (plotlyLoading) {
-      plotlyCallbacks.push(resolve);
-      return;
-    }
-
-    plotlyLoading = true;
-    const script = document.createElement("script");
-    script.src = "https://cdn.plot.ly/plotly-2.27.0.min.js";
-    script.async = true;
-
-    script.onload = () => {
-      plotlyLoaded = true;
-      plotlyLoading = false;
-      resolve();
-      plotlyCallbacks.forEach((cb) => cb());
-      plotlyCallbacks.length = 0;
-    };
-
-    script.onerror = () => {
-      plotlyLoading = false;
-      console.error("Failed to load Plotly");
-    };
-
-    document.head.appendChild(script);
-  });
-}
-
 function PredictionChart({
   predictionData,
   ticker,
   theme = "light",
   locale = "en",
 }: PredictionChartProps) {
-  // Convert locale to BCP 47 format (e.g. "zh_CN" -> "zh-CN")
+  const { t } = useTranslation();
   const bcp47Locale = locale.replace("_", "-");
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const [plotlyReady, setPlotlyReady] = useState(plotlyLoaded);
+  const chartRef = useRef<HTMLDivElement>(null);
+  const chartInstance = useRef<ECharts | null>(null);
+  const stockColors = useStockColors();
 
-  // Parse the chart data from prediction results
-  const chartData = useMemo(() => {
-    if (!predictionData?.chart) {
-      console.log("No chart data available");
-      return null;
-    }
-    try {
-      const parsed = JSON.parse(predictionData.chart);
-      console.log("Chart data parsed:", parsed);
-      return parsed;
-    } catch (e) {
-      console.error("Failed to parse chart data:", e);
-      return null;
-    }
-  }, [predictionData?.chart]);
+  const option: EChartsOption = useMemo(() => {
+    if (!predictionData?.prediction_results?.length) return {};
 
-  // Load Plotly once
-  useEffect(() => {
-    if (!plotlyReady) {
-      loadPlotly().then(() => setPlotlyReady(true));
-    }
-  }, [plotlyReady]);
+    const historical = predictionData.historical_data ?? [];
+    const predictions = predictionData.prediction_results;
+    const actuals = predictionData.actual_data ?? [];
 
-  // Render chart when data and Plotly are ready
-  useEffect(() => {
-    if (!containerRef.current || !chartData || !plotlyReady || !window.Plotly) {
-      return;
+    // Build date axis and data
+    const allDates: string[] = [];
+    const histKlineData: Array<[number, number, number, number]> = [];
+    const predKlineData: Array<[number, number, number, number] | "-"> = [];
+    const actualCloseData: Array<number | "-"> = [];
+
+    // Historical data
+    for (const bar of historical) {
+      const dateStr = new Date(bar.timestamp).toLocaleDateString(bcp47Locale);
+      allDates.push(dateStr);
+      // ECharts candlestick: [open, close, low, high]
+      histKlineData.push([bar.open, bar.close, bar.low, bar.high]);
+      predKlineData.push("-");
+      actualCloseData.push("-");
     }
 
-    console.log("Rendering Plotly chart...");
+    // Prediction data
+    for (let i = 0; i < predictions.length; i++) {
+      const pred = predictions[i];
+      const dateStr = new Date(pred.timestamp).toLocaleDateString(bcp47Locale);
+      allDates.push(dateStr);
+      histKlineData.push([NaN, NaN, NaN, NaN]);
+      predKlineData.push([pred.open, pred.close, pred.low, pred.high]);
+      actualCloseData.push(actuals[i]?.close ?? "-");
+    }
 
-    // Update chart layout based on theme
-    const updatedLayout = {
-      ...chartData.layout,
-      paper_bgcolor: theme === "dark" ? "#1f2937" : "#ffffff",
-      plot_bgcolor: theme === "dark" ? "#1f2937" : "#ffffff",
-      font: {
-        color: theme === "dark" ? "#e5e7eb" : "#1f2937",
+    const textColor = theme === "dark" ? "#ccc" : "#333";
+    const bgColor = theme === "dark" ? "#1a1a2e" : "#ffffff";
+    const predBoundaryIdx = historical.length;
+
+    // Prediction colors — slightly different shade for distinction
+    const predUpColor = "#66BB6A";
+    const predDownColor = "#FF7043";
+
+    const series: EChartsOption["series"] = [
+      {
+        name: t("prediction.historical", "历史数据"),
+        type: "candlestick",
+        data: histKlineData,
+        itemStyle: {
+          color: stockColors.positive,
+          color0: stockColors.negative,
+          borderColor: stockColors.positive,
+          borderColor0: stockColors.negative,
+        },
       },
-      xaxis: {
-        ...chartData.layout?.xaxis,
-        gridcolor: theme === "dark" ? "#374151" : "#e5e7eb",
-        rangeslider: { visible: false },
+      {
+        name: t("prediction.predictionData", "预测数据"),
+        type: "candlestick",
+        data: predKlineData,
+        itemStyle: {
+          color: predUpColor,
+          color0: predDownColor,
+          borderColor: predUpColor,
+          borderColor0: predDownColor,
+        },
       },
-      yaxis: {
-        ...chartData.layout?.yaxis,
-        gridcolor: theme === "dark" ? "#374151" : "#e5e7eb",
-      },
-    };
+    ];
 
-    try {
-      window.Plotly.newPlot(
-        containerRef.current,
-        chartData.data,
-        updatedLayout,
+    // Actual close line if comparison data exists
+    if (actuals.length > 0) {
+      series.push({
+        name: t("prediction.actualClose", "实际收盘价"),
+        type: "line",
+        data: actualCloseData,
+        smooth: false,
+        lineStyle: { width: 2, color: "#FF9800", type: "dashed" },
+        itemStyle: { color: "#FF9800" },
+        symbol: "circle",
+        symbolSize: 4,
+        z: 10,
+      } as EChartsOption["series"]);
+    }
+
+    // Calculate reasonable data zoom range
+    const totalBars = allDates.length;
+    const visibleBars = Math.min(totalBars, 120);
+    const startPct = Math.max(0, ((totalBars - visibleBars) / totalBars) * 100);
+
+    return {
+      backgroundColor: bgColor,
+      animation: true,
+      animationDuration: 500,
+      legend: {
+        top: 0,
+        left: "center",
+        textStyle: { color: textColor, fontSize: 12 },
+      },
+      tooltip: {
+        trigger: "axis",
+        axisPointer: { type: "cross" },
+        borderWidth: 1,
+        borderColor: theme === "dark" ? "#444" : "#ccc",
+        padding: 10,
+        backgroundColor: theme === "dark" ? "#2a2a3e" : "#fff",
+        textStyle: { color: textColor },
+      },
+      axisPointer: {
+        link: [{ xAxisIndex: "all" }],
+        label: { backgroundColor: "#777" },
+      },
+      grid: [
         {
-          responsive: true,
-          displayModeBar: true,
-          displaylogo: false,
-          modeBarButtonsToRemove: ["lasso2d", "select2d"],
-        }
-      );
-      console.log("Plotly chart rendered successfully");
-    } catch (e) {
-      console.error("Failed to render Plotly chart:", e);
-    }
-
-    return () => {
-      if (containerRef.current && window.Plotly) {
-        window.Plotly.purge(containerRef.current);
-      }
+          left: "6%",
+          right: "4%",
+          top: "8%",
+          height: "68%",
+          containLabel: true,
+        },
+      ],
+      xAxis: [
+        {
+          type: "category",
+          data: allDates,
+          boundaryGap: true,
+          axisLine: { lineStyle: { color: textColor } },
+          splitLine: { show: false },
+          min: "dataMin",
+          max: "dataMax",
+          axisPointer: { z: 100 },
+        },
+      ],
+      yAxis: [
+        {
+          scale: true,
+          splitArea: {
+            show: true,
+            areaStyle: {
+              color:
+                theme === "dark"
+                  ? ["rgba(255,255,255,0.02)", "rgba(255,255,255,0.05)"]
+                  : ["rgba(0,0,0,0.02)", "rgba(0,0,0,0.05)"],
+            },
+          },
+          axisLine: { lineStyle: { color: textColor } },
+          splitLine: {
+            lineStyle: {
+              color:
+                theme === "dark"
+                  ? "rgba(255,255,255,0.1)"
+                  : "rgba(0,0,0,0.1)",
+            },
+          },
+        },
+      ],
+      dataZoom: [
+        {
+          type: "inside",
+          xAxisIndex: [0],
+          start: startPct,
+          end: 100,
+        },
+        {
+          show: true,
+          xAxisIndex: [0],
+          type: "slider",
+          top: "82%",
+          height: 30,
+          start: startPct,
+          end: 100,
+        },
+      ],
+      // Mark the prediction boundary with a vertical line
+      ...(predBoundaryIdx > 0
+        ? {}
+        : {}),
+      series: [
+        ...series,
+        // Invisible line series just for the markLine (boundary separator)
+        {
+          type: "line",
+          data: [],
+          markLine: {
+            silent: true,
+            symbol: "none",
+            lineStyle: {
+              color: theme === "dark" ? "#555" : "#bbb",
+              type: "dashed",
+              width: 2,
+            },
+            data: [
+              {
+                xAxis: allDates[predBoundaryIdx] ?? "",
+                label: {
+                  show: true,
+                  formatter: t("prediction.predStart", "预测起点"),
+                  position: "start",
+                  color: theme === "dark" ? "#aaa" : "#666",
+                  fontSize: 11,
+                },
+              },
+            ],
+          },
+        } as EChartsOption["series"],
+      ],
     };
-  }, [chartData, theme, plotlyReady]);
+  }, [predictionData, stockColors, theme, t, bcp47Locale]);
+
+  useChartResize(chartInstance);
+
+  useEffect(() => {
+    if (!chartRef.current) return;
+    chartInstance.current = echarts.init(chartRef.current);
+    chartInstance.current.setOption(option);
+    return () => {
+      chartInstance.current?.dispose();
+    };
+  }, [option]);
+
+  useEffect(() => {
+    if (chartInstance.current) {
+      chartInstance.current.setOption(option);
+    }
+  }, [option]);
 
   if (!predictionData) {
     return null;
   }
 
-  // Show message if no chart but has prediction results
-  const hasResults = predictionData.prediction_results && predictionData.prediction_results.length > 0;
+  const hasResults =
+    predictionData.prediction_results &&
+    predictionData.prediction_results.length > 0;
 
   return (
-    <div className="flex h-full flex-col gap-4">
-      {/* Main Chart */}
-      {chartData ? (
-        <div
-          ref={containerRef}
-          className="h-[420px] w-full rounded-lg border border-border bg-background"
-          style={{ minHeight: "420px" }}
-        />
-      ) : hasResults ? (
-        <div className="flex h-[420px] w-full items-center justify-center rounded-lg border border-dashed border-border bg-muted/30">
-          <div className="text-center text-muted-foreground">
-            <p className="mb-2">Chart visualization not available</p>
-            <p className="text-sm">View prediction data in the table below</p>
-          </div>
-        </div>
+    <div className="flex flex-col gap-2">
+      {/* Main ECharts candlestick chart */}
+      {hasResults ? (
+        <div ref={chartRef} className="w-full" style={{ height: 520 }} />
       ) : (
         <div className="flex h-[420px] w-full items-center justify-center rounded-lg border border-dashed border-border">
-          <p className="text-muted-foreground">No prediction data</p>
+          <p className="text-muted-foreground">
+            {t("prediction.noData", "暂无预测数据")}
+          </p>
         </div>
       )}
 
       {/* Prediction vs Actual Comparison Table */}
-      {predictionData.prediction_results && predictionData.prediction_results.length > 0 && (
+      {hasResults && (
         <div className="rounded-lg border border-border">
           <div className="max-h-[200px] overflow-auto">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-muted">
                 <tr>
                   <th className="px-3 py-2 text-left font-medium text-muted-foreground">
-                    Time
+                    {t("prediction.time", "时间")}
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">
-                    Pred Open
+                    {t("prediction.predOpen", "预测开盘")}
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">
-                    Pred High
+                    {t("prediction.predHigh", "预测最高")}
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">
-                    Pred Low
+                    {t("prediction.predLow", "预测最低")}
                   </th>
                   <th className="px-3 py-2 text-right font-medium text-muted-foreground">
-                    Pred Close
+                    {t("prediction.predClose", "预测收盘")}
                   </th>
                   {predictionData.has_comparison && (
                     <>
                       <th className="px-3 py-2 text-right font-medium text-green-600">
-                        Actual Close
+                        {t("prediction.actualClose", "实际收盘")}
                       </th>
                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">
-                        Error %
+                        {t("prediction.errorPct", "误差%")}
                       </th>
                     </>
                   )}
                 </tr>
               </thead>
               <tbody>
-                {predictionData.prediction_results.slice(0, 20).map((pred, idx) => {
-                  const actual = predictionData.actual_data?.[idx];
-                  const errorPct = actual
-                    ? (((pred.close - actual.close) / actual.close) * 100).toFixed(2)
-                    : null;
+                {predictionData.prediction_results
+                  .slice(0, 20)
+                  .map((pred, idx) => {
+                    const actual = predictionData.actual_data?.[idx];
+                    const errorPct = actual
+                      ? (
+                          ((pred.close - actual.close) / actual.close) *
+                          100
+                        ).toFixed(2)
+                      : null;
 
-                  return (
-                    <tr
-                      key={pred.timestamp}
-                      className="border-t border-border hover:bg-muted/50"
-                    >
-                      <td className="px-3 py-2 text-foreground">
-                        {new Date(pred.timestamp).toLocaleDateString(bcp47Locale)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-foreground">
-                        {pred.open.toFixed(2)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-foreground">
-                        {pred.high.toFixed(2)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-foreground">
-                        {pred.low.toFixed(2)}
-                      </td>
-                      <td className="px-3 py-2 text-right text-foreground">
-                        {pred.close.toFixed(2)}
-                      </td>
-                      {predictionData.has_comparison && (
-                        <>
-                          <td className="px-3 py-2 text-right text-green-600">
-                            {actual?.close.toFixed(2) ?? "-"}
-                          </td>
-                          <td
-                            className={`px-3 py-2 text-right ${
-                              errorPct && Number(errorPct) > 0
-                                ? "text-red-500"
-                                : "text-green-500"
-                            }`}
-                          >
-                            {errorPct ? `${errorPct}%` : "-"}
-                          </td>
-                        </>
-                      )}
-                    </tr>
-                  );
-                })}
+                    return (
+                      <tr
+                        key={pred.timestamp}
+                        className="border-t border-border hover:bg-muted/50"
+                      >
+                        <td className="px-3 py-2 text-foreground">
+                          {new Date(pred.timestamp).toLocaleDateString(
+                            bcp47Locale
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right text-foreground">
+                          {pred.open.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-foreground">
+                          {pred.high.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-foreground">
+                          {pred.low.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2 text-right text-foreground">
+                          {pred.close.toFixed(2)}
+                        </td>
+                        {predictionData.has_comparison && (
+                          <>
+                            <td className="px-3 py-2 text-right text-green-600">
+                              {actual?.close.toFixed(2) ?? "-"}
+                            </td>
+                            <td
+                              className={`px-3 py-2 text-right ${
+                                errorPct && Number(errorPct) > 0
+                                  ? "text-red-500"
+                                  : "text-green-500"
+                              }`}
+                            >
+                              {errorPct ? `${errorPct}%` : "-"}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -248,21 +392,6 @@ function PredictionChart({
       )}
     </div>
   );
-}
-
-// Extend Window interface for Plotly
-declare global {
-  interface Window {
-    Plotly: {
-      newPlot: (
-        element: HTMLElement,
-        data: unknown[],
-        layout: unknown,
-        config: unknown
-      ) => void;
-      purge: (element: HTMLElement) => void;
-    };
-  }
 }
 
 export default memo(PredictionChart);

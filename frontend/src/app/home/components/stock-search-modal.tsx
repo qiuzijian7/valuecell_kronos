@@ -86,22 +86,17 @@ export default function StockSearchModal({ children }: StockSearchModalProps) {
   });
 
   const filteredStockList = (stockList || []).filter((stock) => {
-    const assetType = stock.asset_type?.toLowerCase();
     const exchange = (stock.exchange || "").toUpperCase();
     const prefix = (stock.ticker?.split(":")[0] || "").toUpperCase();
 
-    const US_EXCHANGES = new Set(["NASDAQ", "NYSE", "AMEX"]);
-    const CN_EXCHANGES = new Set(["SSE", "SZSE", "HKEX"]);
-    const JP_EXCHANGES = new Set(["TSE", "JPX", "TYO"]);
+    const SUPPORTED_EXCHANGES = new Set([
+      "NASDAQ", "NYSE", "AMEX",
+      "SSE", "SZSE", "HKEX",
+      "TSE", "JPX", "TYO",
+      "CRYPTO",
+    ]);
 
-    const isCrypto = assetType === "crypto" || prefix === "CRYPTO";
-    const isUS = US_EXCHANGES.has(exchange) || US_EXCHANGES.has(prefix);
-    const isCN = CN_EXCHANGES.has(exchange) || CN_EXCHANGES.has(prefix);
-    const isJP = JP_EXCHANGES.has(exchange) || JP_EXCHANGES.has(prefix);
-
-    const isStock = assetType === "stock";
-
-    return isCrypto || (isStock && (isUS || isCN || isJP));
+    return SUPPORTED_EXCHANGES.has(exchange) || SUPPORTED_EXCHANGES.has(prefix);
   });
 
   return (

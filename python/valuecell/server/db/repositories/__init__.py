@@ -5,6 +5,10 @@ from .asset_repository import (
     get_asset_repository,
     reset_asset_repository,
 )
+from .stock_ohlcv_repository import (
+    StockOHLCVRepository,
+    get_stock_ohlcv_repository,
+)
 from .strategy_repository import (
     StrategyRepository,
     get_strategy_repository,
@@ -21,6 +25,8 @@ __all__ = [
     "AssetRepository",
     "get_asset_repository",
     "reset_asset_repository",
+    "StockOHLCVRepository",
+    "get_stock_ohlcv_repository",
     "UserProfileRepository",
     "WatchlistRepository",
     "get_watchlist_repository",

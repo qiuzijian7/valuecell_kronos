@@ -85,8 +85,7 @@ class YFinanceAdapter(BaseDataAdapter):
 
         Uses yfinance.Search for better search results across stocks, ETFs, and other assets.
         Falls back to direct ticker lookup for specific symbols.
-
-        This method
+        For numeric queries (e.g. "700"), also tries HK stock format (0700.HK).
         """
         results = []
         search_term = query.query.strip()
@@ -110,6 +109,30 @@ class YFinanceAdapter(BaseDataAdapter):
 
         except Exception as e:
             logger.error(f"yfinance Search API failed for '{search_term}': {e}")
+
+        # For numeric queries, also try HK stock lookup (e.g. "700" -> "0700.HK")
+        # Yahoo Finance uses 4-digit format for HK stocks (0700.HK, not 00700.HK)
+        if search_term.isdigit() and 1 <= len(search_term) <= 5:
+            # Strip leading zeros beyond 4 digits, then pad to 4 digits
+            numeric_val = search_term.lstrip("0") or "0"
+            if len(numeric_val) <= 4:
+                hk_symbol = numeric_val.zfill(4) + ".HK"
+                existing_tickers = {r.ticker for r in results}
+                if not any(r.exchange == Exchange.HKEX.value for r in results):
+                    try:
+                        hk_search = yf.Search(hk_symbol)
+                        hk_quotes = getattr(hk_search, "quotes", [])
+                        for quote in hk_quotes:
+                            try:
+                                result = self._create_search_result_from_quote(quote)
+                                if result and result.ticker not in existing_tickers:
+                                    results.insert(0, result)
+                                    existing_tickers.add(result.ticker)
+                            except Exception as e:
+                                logger.debug(f"Error processing HK search quote: {e}")
+                                continue
+                    except Exception as e:
+                        logger.debug(f"HK stock fallback search failed for '{hk_symbol}': {e}")
 
         return results[: query.limit]
 
