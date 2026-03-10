@@ -13,7 +13,6 @@ import {
   Logo,
   Market,
   Prediction,
-  Ranking,
   Setting,
   StrategyAgent,
 } from "@/assets/svg";
@@ -163,12 +162,12 @@ const AppSidebar: FC = () => {
           label: t("nav.prediction"),
           to: "/prediction",
         },
-        {
-          id: "ranking",
-          icon: Ranking,
-          label: t("nav.ranking"),
-          to: "/ranking",
-        },
+        // {
+        //   id: "ranking",
+        //   icon: Ranking,
+        //   label: t("nav.ranking"),
+        //   to: "/ranking",
+        // },
         {
           id: "market",
           icon: Market,
